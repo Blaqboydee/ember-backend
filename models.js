@@ -7,10 +7,6 @@ const userSchema = new mongoose.Schema(
     avatar: { type: String, default: "" },
     isVerified: { type: Boolean, default: false },
 
-    //  Email verification fields
-    verificationToken: { type: String }, // will store a hashed token
-    verificationTokenExpires: { type: Date },
-
     bioStatus: {
       type: String,
       default: "Hey there! I am using Zaptalk.",
