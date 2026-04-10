@@ -100,9 +100,41 @@ async function uploadAvatar(req, res) {
 
 
 
+// Delete avatar from Cloudinary and clear from user document
+async function deleteAvatar(req, res) {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Derive public_id from stored URL, e.g. avatars/user_abc_123
+    if (user.avatar) {
+      const uploadSegment = user.avatar.split('/upload/')[1];
+      if (uploadSegment) {
+        // strip leading version segment (v12345/) if present
+        const withoutVersion = uploadSegment.replace(/^v\d+\//, '');
+        // strip file extension
+        const publicId = withoutVersion.replace(/\.[^/.]+$/, '');
+        await cloudinary.uploader.destroy(publicId).catch(() => {}); // best-effort
+      }
+    }
+
+    const updated = await User.findByIdAndUpdate(
+      req.user.id,
+      { $unset: { avatar: '' } },
+      { new: true, select: '-password -__v' }
+    );
+
+    res.json({ message: 'Avatar removed successfully', user: updated });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+}
+
 module.exports = {
   getUsers,
   getProfile,
   updateProfile,
   uploadAvatar,
+  deleteAvatar,
 };

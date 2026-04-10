@@ -39,12 +39,12 @@ async function getMessages(req, res) {
     let messages;
     if (chatId) {
       messages = await Message.find({ chatId })
-        .populate("senderId", "name email") 
+        .populate("senderId", "name email avatar") 
         .sort({ createdAt: 1 }) 
         .exec();
     } else {
       messages = await Message.find()
-        .populate("senderId", "name email")
+        .populate("senderId", "name email avatar")
         .sort({ createdAt: 1 })
         .exec();
     }
@@ -117,7 +117,7 @@ async function editMessage(req, res) {
       { _id: messageId, senderId: userId },  // notice: senderId not sender
       { content },
       { new: true }                   // return updated doc
-    ).populate("senderId", "name email");
+    ).populate("senderId", "name email avatar");
 
     if (!message) {
       return res.status(404).json({ error: "Message not found or not authorized" });

@@ -14,6 +14,6 @@ sgMail
   .send(msg)
   .then(() => console.log('✅ Email sent successfully'))
   .catch((err) => {
-    console.error('❌ Error sending email:');
+    console.error(' Error sending email:');
     console.error(err.response?.body || err.message || err);
   });

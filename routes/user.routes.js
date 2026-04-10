@@ -8,6 +8,7 @@ const {
   getProfile,
   updateProfile,
   uploadAvatar,
+  deleteAvatar,
 } = require("../controllers/user.controller");
 
 const multer = require("multer");
@@ -26,5 +27,8 @@ router.put("/profile", authenticateToken, updateProfile);
 
 // Upload avatar to Cloudinary
 router.post("/upload-avatar", authenticateToken, upload.single("avatar"), uploadAvatar);
+
+// Delete avatar
+router.delete("/delete-avatar", authenticateToken, deleteAvatar);
 
 module.exports = router;

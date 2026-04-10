@@ -177,23 +177,25 @@ async function acceptFriendRequest(req, res) {
     await user.save();
     await requester.save();
 
-// // Notify the accepter (user)
-// req.io.to(userId).emit("friend_request_accepted", {
-//   friend: {
-//     id: requester._id,
-//     name: requesterName,
-//     email: requester.email,
-//     // profilePic: requester.profilePic,
-//   },
-// });
-
-// Notify the requester (sender)
+// Notify the requester (sender) their request was accepted
 req.io.to(requesterId).emit("friend_request_accepted", {
   friend: {
     _id: user._id,
     name: user.name,
     email: user.email,
     avatar: user.avatar,
+    status: user.status,
+  },
+});
+
+// Notify the accepter so their own friends list updates via socket too
+req.io.to(userId).emit("friend_added", {
+  friend: {
+    _id: requester._id,
+    name: requester.name,
+    email: requester.email,
+    avatar: requester.avatar,
+    status: requester.status,
   },
 });
 
@@ -233,6 +235,11 @@ async function rejectFriendRequest(req, res) {
 
     await user.save();
     await requester.save();
+
+    // Notify sender that their request was rejected
+    req.io.to(requesterId).emit("friend_request_rejected", {
+      receiverId: userId,
+    });
 
     res.json({ message: "Friend request rejected" });
   } catch (err) {

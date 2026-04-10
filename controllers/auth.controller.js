@@ -1,34 +1,38 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-require('dotenv').config(); 
+const path = require("path");
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const crypto = require("crypto");
 const { User } = require("../models");
 const { OAuth2Client } = require('google-auth-library');
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-const sgMail = require('@sendgrid/mail');
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 
 // Helper function to send verification emails
 async function sendVerificationEmail(email, name, verificationLink) {
-  const msg = {
-    to: email,
-    from: process.env.FROM_EMAIL,
-    subject: 'Welcome to Zaptalk! Please Verify Your Email',
-    html: `<p>Hi ${name},</p>
-           <p>Thank you for registering at Zaptalk! Please verify your email by clicking the link below:</p>
-           <a href="${verificationLink}">Verify My Email</a>
-           <p>This link will expire in 1 hour.</p>
-           <p>If you did not sign up for Zaptalk, please ignore this email.</p>
-           <p>Best regards,<br/>The Zaptalk Team</p>`,
-  };
-
   try {
-    await sgMail.send(msg);
-    console.log('✅ Verification email sent successfully to:', email);
+    const { error } = await resend.emails.send({
+      from: process.env.FROM_EMAIL || 'Zaptalk <onboarding@resend.dev>',
+      to: email,
+      subject: 'Welcome to Zaptalk! Please Verify Your Email',
+      html: `<p>Hi ${name},</p>
+             <p>Thank you for registering at Zaptalk! Please verify your email by clicking the link below:</p>
+             <a href="${verificationLink}">Verify My Email</a>
+             <p>This link will expire in 1 hour.</p>
+             <p>If you did not sign up for Zaptalk, please ignore this email.</p>
+             <p>Best regards,<br/>The Zaptalk Team</p>`,
+    });
+
+    if (error) {
+      console.error(' Error sending verification email:', error);
+      throw new Error('Failed to send verification email');
+    }
+
+    console.log(' Verification email sent successfully to:', email);
   } catch (err) {
-    console.error('❌ Error sending verification email:');
-    console.error(err.response?.body || err.message || err);
+    console.error(' Error sending verification email:', err.message || err);
     throw new Error('Failed to send verification email');
   }
 }
@@ -53,35 +57,18 @@ async function register(req, res) {
     // Hash password
     const hash = await bcrypt.hash(password, 10);
 
-    // Generate a random token
-    const rawToken = crypto.randomBytes(32).toString("hex");
-
-    // Hash it before saving
-    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
-
-    // Set expiry (1 hour from now)
-    const expiry = Date.now() + 60 * 60 * 1000; 
-
-    // Create user
+    // Create user (auto-verified — no email confirmation required)
     const user = new User({
       name,
       email,
       password: hash,
-      verificationToken: hashedToken,
-      verificationTokenExpires: expiry,
+      isVerified: true,
     });
 
-    // Save user
     await user.save();
 
-    // Build verification link
-    const verificationLink = `${process.env.APP_URL}/auth/verify-email?token=${rawToken}`;
-
-    // Send verification email
-    await sendVerificationEmail(email, name, verificationLink);
-
     return res.status(201).json({
-      message: "Registration successful. Please check your email to verify your account.",
+      message: "Registration successful. You can now log in.",
       user: {
         id: user._id,
         name: user.name,
@@ -183,13 +170,6 @@ async function login(req, res) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Check if email is verified
-    if (!user.isVerified) {
-      return res
-        .status(403)
-        .json({ error: "Please verify your email before logging in." });
-    }
-
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) {
       return res.status(401).json({ error: "Invalid credentials" });
@@ -235,14 +215,15 @@ const googleLogin = async (req, res) => {
       return res.status(400).json({ success: false, message: "No token provided" });
     }
 
-    // Verify token with Google
-    const ticket = await client.verifyIdToken({
-      idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID.trim(),
-    });
-
-    const payload = ticket.getPayload();
-    const { name, email, picture, sub: googleId } = payload;
+    // Fetch user info using the access token
+    const userInfoRes = await fetch(
+      `https://www.googleapis.com/oauth2/v3/userinfo`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!userInfoRes.ok) {
+      return res.status(401).json({ success: false, message: "Invalid Google token" });
+    }
+    const { name, email, picture, sub: googleId } = await userInfoRes.json();
 
     let user = await User.findOne({ email });
     let isNewUser = false;

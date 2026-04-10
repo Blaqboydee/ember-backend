@@ -110,24 +110,50 @@ async function getDirectChats(req, res) {
 
 async function getGroupChats(req, res) {
   try {
-    const userId = req.query.userId; // Pass userId in query or get from auth
-    console.log(userId);
-    
+    const userId = req.query.userId;
     const groupChats = await Chat.find({
       isDirect: false,
-      users: userId, // Ensure the user is a member of the group
+      users: userId,
     })
-      // .populate("userIds", "name email") // Populate users in the group
-      .populate("messages"); // Optionally populate last message
+      .populate("users", "name avatar status")
+      .populate("messages");
 
     res.status(200).json(groupChats);
-    // console.log(groupChats);
-    
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Failed to load group chats" });
   }
-};
+}
+
+// Leave a group chat
+async function leaveGroup(req, res) {
+  try {
+    const { chatId } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const chat = await Chat.findById(chatId);
+    if (!chat) return res.status(404).json({ error: "Group not found" });
+    if (chat.isDirect) return res.status(400).json({ error: "Cannot leave a direct chat" });
+
+    chat.users = chat.users.filter((u) => u.toString() !== userId);
+
+    if (chat.users.length === 0) {
+      await Chat.findByIdAndDelete(chatId);
+    } else {
+      await chat.save();
+    }
+
+    // Notify remaining members
+    req.io.to(chatId).emit("user_left_group", { groupId: chatId, userId });
+
+    res.json({ message: "Left group successfully" });
+  } catch (error) {
+    console.error("Leave group error:", error);
+    res.status(500).json({ error: error.message });
+  }
+}
 
 
 // Get all chats (direct + group) for a user
@@ -153,5 +179,5 @@ async function getUserChats(req, res) {
   }
 }
 
-module.exports = { createChat, getDirectChats, getGroupChats, getUserChats };
+module.exports = { createChat, getDirectChats, getGroupChats, getUserChats, leaveGroup };
 

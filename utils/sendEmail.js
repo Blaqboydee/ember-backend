@@ -1,26 +1,18 @@
-const nodemailer = require("nodemailer");
+const { Resend } = require('resend');
 
 async function sendEmail(to, subject, html) {
-  // transporter
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
+  const resend = new Resend(process.env.RESEND_API_KEY);
 
-
-  // mail options
-  const mailOptions = {
-    from: `"Zaptalk" <${process.env.EMAIL_USER}>`,
+  const { error } = await resend.emails.send({
+    from: process.env.FROM_EMAIL || 'Zaptalk <onboarding@resend.dev>',
     to,
     subject,
     html,
-  };
+  });
 
-  // send mail
-  await transporter.sendMail(mailOptions);
+  if (error) {
+    throw new Error(`Failed to send email: ${error.message}`);
+  }
 }
 
 module.exports = sendEmail;

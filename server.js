@@ -2,7 +2,8 @@
 const mongoose = require('mongoose');
 const express = require("express");
 const cors = require("cors");
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 const http = require("http");
 const { Server } = require("socket.io");
 const connect = require("./db");
@@ -31,15 +32,8 @@ const allowedOrigins = [
 
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
+    origin: "*",
     methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true,
   })
 );
 
@@ -67,11 +61,13 @@ app.get("/", (req, res) => {
 // Socket.IO setup
 io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: "*",
     methods: ["GET", "POST"],
-    credentials: true,
   },
 });
+
+// Track active socket connections per user: userId → Set<socketId>
+const onlineUsers = new Map();
 
 io.on("connection", (socket) => {
   // console.log(" User connected:", socket.id);
@@ -79,7 +75,12 @@ io.on("connection", (socket) => {
   // When a user comes online
   socket.on("user-online", async (userId) => {
     try {
-      // ✅ Join a private room with the userId
+      // Track this socket for the user
+      socket.userId = userId;
+      if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
+      onlineUsers.get(userId).add(socket.id);
+
+      // Join a private room with the userId
       socket.join(userId);
 
       await User.findByIdAndUpdate(userId, {
@@ -96,6 +97,16 @@ io.on("connection", (socket) => {
     } catch (err) {
       console.error("Error setting user online:", err);
     }
+  });
+
+  // Return which of the given friend IDs are currently online
+  socket.on("get_friends_online_status", (friendIds) => {
+    if (!Array.isArray(friendIds)) return;
+    const result = {};
+    friendIds.forEach((id) => {
+      result[id] = onlineUsers.has(id) && onlineUsers.get(id).size > 0;
+    });
+    socket.emit("friends_online_status", result);
   });
 
   // Join multiple chats
@@ -202,7 +213,7 @@ socket.on('stopTyping', (data) => {
         chatId: data.chatId,
       });
 
-      await message.populate("senderId", "name email");
+      await message.populate("senderId", "name email avatar");
       io.to(data.chatId).emit("receive_message", message);
     } catch (err) {
       console.error("Error saving message:", err);
@@ -236,12 +247,31 @@ socket.on('stopTyping', (data) => {
     }
   });
 
-  // Disconnect handler
+  // Disconnect handler - auto-offline when all sessions close
   socket.on("disconnect", async () => {
-    // console.log(" User disconnected:", socket.id);
+    const userId = socket.userId;
+    if (!userId) return;
 
-    //  We don’t know userId directly on disconnect anymore
-    // (Frontend should emit "user-offline" before closing tab)
+    const sockets = onlineUsers.get(userId);
+    if (sockets) {
+      sockets.delete(socket.id);
+      if (sockets.size === 0) {
+        onlineUsers.delete(userId);
+        try {
+          const lastSeen = new Date();
+          await User.findByIdAndUpdate(userId, {
+            "status.state": "offline",
+            "status.lastSeen": lastSeen,
+          });
+          io.emit("user-status-updated", {
+            userId,
+            status: { state: "offline", lastSeen },
+          });
+        } catch (err) {
+          console.error("Error setting user offline on disconnect:", err);
+        }
+      }
+    }
   });
 });
 
