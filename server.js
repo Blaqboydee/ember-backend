@@ -27,7 +27,7 @@ const allowedOrigins = [
   "http://127.0.0.1:5173",
   "http://172.18.64.1:3000",
   "http://192.168.0.187:5173",
-  "https://zaptalk-frontend.vercel.app",
+  "https://emberconnect.vercel.app",
 ];
 
 app.use(
@@ -276,8 +276,9 @@ socket.on('stopTyping', (data) => {
 });
 
 // Start server
-connect();
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () =>
-  console.log(` Server running on port ${PORT}`)
-);
+connect().then(() => {
+  server.listen(PORT, () =>
+    console.log(` Server running on port ${PORT}`)
+  );
+});
