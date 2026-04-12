@@ -54,6 +54,7 @@ const chatSchema = new mongoose.Schema(
   {
     name: { type: String},
     isDirect: { type: Boolean, default: false },
+    confessionMode: { type: Boolean, default: false },
     users: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     messages: [{ type: mongoose.Schema.Types.ObjectId, ref: "Message" }],
   },
@@ -66,6 +67,10 @@ const messageSchema = new mongoose.Schema(
     content: { type: String, required: true },
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     chatId: { type: mongoose.Schema.Types.ObjectId, ref: "Chat" },
+    replyTo: { type: mongoose.Schema.Types.ObjectId, ref: "Message", default: null },
+    mentions: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    isAnonymous: { type: Boolean, default: false },
+    anonymousAlias: { type: String, default: null },
   },
   { timestamps: true }
 );

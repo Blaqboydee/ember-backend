@@ -39,12 +39,16 @@ async function getMessages(req, res) {
     let messages;
     if (chatId) {
       messages = await Message.find({ chatId })
-        .populate("senderId", "name email avatar") 
+        .populate("senderId", "name email avatar")
+        .populate({ path: "replyTo", select: "content senderId isAnonymous anonymousAlias", populate: { path: "senderId", select: "name avatar" } })
+        .populate("mentions", "name avatar")
         .sort({ createdAt: 1 }) 
         .exec();
     } else {
       messages = await Message.find()
         .populate("senderId", "name email avatar")
+        .populate({ path: "replyTo", select: "content senderId isAnonymous anonymousAlias", populate: { path: "senderId", select: "name avatar" } })
+        .populate("mentions", "name avatar")
         .sort({ createdAt: 1 })
         .exec();
     }

@@ -7,7 +7,7 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 const http = require("http");
 const { Server } = require("socket.io");
 const connect = require("./db");
-const { Message, User } = require("./models");
+const { Message, User, Chat } = require("./models");
 
 // Routes
 const userRoutes = require("./routes/user.routes");
@@ -166,8 +166,6 @@ socket.on('deleteMessage', async ({ messageId, chatId, userId }) => {
 
 // Typing indicators
 socket.on('startTyping', async (data) => {
-  // console.log(data);
-  
   try {
     const { chatId, userId, otherUserId } = data;
     
@@ -201,22 +199,88 @@ socket.on('stopTyping', (data) => {
   }
 });
 
+// Ghost typing — relay live keystrokes
+socket.on('ghostTyping', (data) => {
+  const { chatId, userId, text } = data;
+  socket.to(chatId).emit('ghostTypingUpdate', { chatId, userId, text });
+});
+
+socket.on('ghostTypingStop', (data) => {
+  const { chatId, userId } = data;
+  socket.to(chatId).emit('ghostTypingCleared', { chatId, userId });
+});
+
 
   // Send message
   socket.on("send_message", async (data) => {
     if (!data.content || !data.senderId || !data.chatId) return;
 
     try {
+      // Check if the chat has confession mode enabled
+      const chat = await Chat.findById(data.chatId);
+      const isAnonymous = data.isAnonymous || (chat && chat.confessionMode && !chat.isDirect);
+
+      const ANONYMOUS_ALIASES = [
+        'Anonymous Ember 🔥', 'Shadow Spark ⚡', 'Mystery Flame 🕯️',
+        'Ghost Fire 👻', 'Hidden Ember 🌑', 'Secret Blaze 💫',
+        'Dark Spark 🌟', 'Unknown Flame 🔮', 'Silent Ember 🦇',
+        'Phantom Fire 💀', 'Veiled Spark ✨', 'Masked Ember 🎭',
+      ];
+
+      const anonymousAlias = isAnonymous
+        ? ANONYMOUS_ALIASES[Math.floor(Math.random() * ANONYMOUS_ALIASES.length)]
+        : null;
+
       const message = await Message.create({
         content: data.content,
         senderId: data.senderId,
         chatId: data.chatId,
+        replyTo: data.replyTo || null,
+        mentions: data.mentions || [],
+        isAnonymous: !!isAnonymous,
+        anonymousAlias: anonymousAlias,
       });
 
       await message.populate("senderId", "name email avatar");
-      io.to(data.chatId).emit("receive_message", message);
+      await message.populate({ path: "replyTo", select: "content senderId", populate: { path: "senderId", select: "name avatar" } });
+      await message.populate("mentions", "name avatar");
+
+      // If anonymous, strip sender info before broadcasting
+      const messageObj = message.toObject();
+      if (isAnonymous) {
+        const sanitized = {
+          ...messageObj,
+          senderId: {
+            _id: 'anonymous',
+            name: anonymousAlias,
+            email: '',
+            avatar: '',
+          },
+        };
+        // Send sanitized to everyone EXCEPT the sender
+        socket.to(data.chatId).emit("receive_message", sanitized);
+        // Send the real version only to the sender so they see their own message
+        const senderVersion = {
+          ...messageObj,
+          _isOwnAnonymous: true,
+        };
+        socket.emit("receive_message", senderVersion);
+      } else {
+        io.to(data.chatId).emit("receive_message", messageObj);
+      }
     } catch (err) {
       console.error("Error saving message:", err);
+    }
+  });
+
+  // Toggle confession mode for a group chat
+  socket.on("toggle_confession_mode", async (data) => {
+    const { chatId, enabled } = data;
+    try {
+      await Chat.findByIdAndUpdate(chatId, { confessionMode: !!enabled });
+      io.to(chatId).emit("confession_mode_changed", { chatId, enabled: !!enabled });
+    } catch (err) {
+      console.error("Error toggling confession mode:", err);
     }
   });
 

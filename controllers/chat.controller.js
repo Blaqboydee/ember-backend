@@ -98,10 +98,29 @@ async function getDirectChats(req, res) {
     const chats = await Chat.find({ 
       isDirect: true,
       users: userId })
-      .populate("users messages") // populate user info and messages
+      .populate("users", "name email avatar status")
+      .lean()
       .exec();
 
-    res.json(chats);
+    // Attach the last message to each chat
+    const { Message } = require("../models");
+    const chatIds = chats.map((c) => c._id);
+    const lastMessages = await Message.aggregate([
+      { $match: { chatId: { $in: chatIds } } },
+      { $sort: { createdAt: 1 } },
+      { $group: { _id: "$chatId", lastMessage: { $last: "$$ROOT" } } },
+    ]);
+    const lastMsgMap = {};
+    lastMessages.forEach((item) => {
+      lastMsgMap[item._id.toString()] = item.lastMessage;
+    });
+
+    const result = chats.map((chat) => ({
+      ...chat,
+      lastMessage: lastMsgMap[chat._id.toString()] || null,
+    }));
+
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -111,14 +130,48 @@ async function getDirectChats(req, res) {
 async function getGroupChats(req, res) {
   try {
     const userId = req.query.userId;
+    const { Message } = require("../models");
+
     const groupChats = await Chat.find({
       isDirect: false,
       users: userId,
     })
       .populate("users", "name avatar status")
-      .populate("messages");
+      .lean()
+      .exec();
 
-    res.status(200).json(groupChats);
+    // Attach the last message to each group chat
+    const chatIds = groupChats.map((c) => c._id);
+    const lastMessages = await Message.aggregate([
+      { $match: { chatId: { $in: chatIds } } },
+      { $sort: { createdAt: 1 } },
+      { $group: { _id: "$chatId", lastMessage: { $last: "$$ROOT" } } },
+    ]);
+
+    // Populate senderId on last messages
+    const lastMsgMap = {};
+    for (const item of lastMessages) {
+      const msg = item.lastMessage;
+      if (msg.senderId) {
+        const sender = await User.findById(msg.senderId).select("name avatar").lean();
+        msg.senderId = sender;
+      }
+      lastMsgMap[item._id.toString()] = msg;
+    }
+
+    const result = groupChats.map((chat) => ({
+      ...chat,
+      lastMessage: lastMsgMap[chat._id.toString()] || null,
+    }));
+
+    // Sort by most recent activity
+    result.sort((a, b) => {
+      const aTime = a.lastMessage?.createdAt || a.updatedAt || a.createdAt;
+      const bTime = b.lastMessage?.createdAt || b.updatedAt || b.createdAt;
+      return new Date(bTime) - new Date(aTime);
+    });
+
+    res.status(200).json(result);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Failed to load group chats" });
