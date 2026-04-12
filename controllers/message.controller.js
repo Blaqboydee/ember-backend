@@ -34,7 +34,7 @@ async function createMessage(req, res) {
 // Get all messages or by chat
 async function getMessages(req, res) {
   try {
-    const { chatId } = req.query;
+    const { chatId, userId } = req.query;
 
     let messages;
     if (chatId) {
@@ -43,6 +43,7 @@ async function getMessages(req, res) {
         .populate({ path: "replyTo", select: "content senderId isAnonymous anonymousAlias", populate: { path: "senderId", select: "name avatar" } })
         .populate("mentions", "name avatar")
         .sort({ createdAt: 1 }) 
+        .lean()
         .exec();
     } else {
       messages = await Message.find()
@@ -50,7 +51,47 @@ async function getMessages(req, res) {
         .populate({ path: "replyTo", select: "content senderId isAnonymous anonymousAlias", populate: { path: "senderId", select: "name avatar" } })
         .populate("mentions", "name avatar")
         .sort({ createdAt: 1 })
+        .lean()
         .exec();
+    }
+
+    // Sanitize anonymous messages — hide real sender from other users
+    if (userId) {
+      messages = messages.map((msg) => {
+        if (msg.isAnonymous) {
+          const isOwn = msg.senderId?._id?.toString() === userId;
+          if (isOwn) {
+            // Sender sees their own message with a flag
+            return { ...msg, _isOwnAnonymous: true };
+          } else {
+            // Others see the anonymous alias
+            return {
+              ...msg,
+              senderId: {
+                _id: 'anonymous',
+                name: msg.anonymousAlias || 'Anonymous',
+                email: '',
+                avatar: '',
+              },
+            };
+          }
+        }
+        // Also sanitize anonymous replies
+        if (msg.replyTo?.isAnonymous) {
+          const isOwnReply = msg.replyTo.senderId?._id?.toString() === userId;
+          if (!isOwnReply) {
+            msg.replyTo = {
+              ...msg.replyTo,
+              senderId: {
+                _id: 'anonymous',
+                name: msg.replyTo.anonymousAlias || 'Anonymous',
+                avatar: '',
+              },
+            };
+          }
+        }
+        return msg;
+      });
     }
 
     res.json(messages);
